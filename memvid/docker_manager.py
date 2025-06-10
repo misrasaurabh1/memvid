@@ -40,8 +40,18 @@ class DockerManager:
         # Setup state
         self.setup_status = "unknown"
         self.project_root = self._find_project_root()
+        # Precompute docker build paths and command for best-case _build_container
+        self._dockerfile_dir = (self.project_root / "docker") if self.project_root else None
+        if self._dockerfile_dir:
+            self._dockerfile_path = self._dockerfile_dir / "Dockerfile"
+            # Precompute string representations to avoid repeated str() and / ops
+            self._dockerfile_str = str(self._dockerfile_path)
+            self._dockerfile_dir_str = str(self._dockerfile_dir)
+        else:
+            self._dockerfile_path = None
+            self._dockerfile_str = None
+            self._dockerfile_dir_str = None
 
-        # Initialize Docker environment
         if self.docker_available:
             self._check_docker_environment()
 
@@ -124,18 +134,13 @@ class DockerManager:
         Returns:
             True if container is ready, False otherwise
         """
+        # Cache commonly used vars locally for speed in hot path
         if self.container_ready:
             return True
-
-        if not self.docker_available:
+        if not self.docker_available or self.setup_status != "container_missing":
             return False
-
-        if self.setup_status != "container_missing":
-            return False
-
         if auto_build:
             return self._build_container()
-
         if self.verbose:
             logger.warning(f"Container {self.container_name} not found. "
                            f"Run 'make build' or enable auto_build=True")
@@ -143,19 +148,19 @@ class DockerManager:
 
     def _build_container(self) -> bool:
         """Build the Docker container"""
-        if not self.project_root:
+        # Use precomputed dockerfile path and string representations
+        if not self._dockerfile_dir:
             if self.verbose:
                 logger.error("Cannot find project root with docker/ directory")
             return False
 
         try:
-            dockerfile_path = self.project_root / "docker"
-
+            # Use precomputed command components to reduce runtime code
             cmd = [
                 self.docker_cmd, "build",
-                "-f", str(dockerfile_path / "Dockerfile"),
+                "-f", self._dockerfile_str,
                 "-t", self.container_name,
-                str(dockerfile_path)
+                self._dockerfile_dir_str
             ]
 
             if self.verbose:
