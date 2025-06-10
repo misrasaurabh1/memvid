@@ -41,6 +41,9 @@ class DockerManager:
         self.setup_status = "unknown"
         self.project_root = self._find_project_root()
 
+        # Cache for cleanup to avoid repeated slow rmi calls if image already removed
+        self._image_removed = False
+
         # Initialize Docker environment
         if self.docker_available:
             self._check_docker_environment()
@@ -399,12 +402,22 @@ class DockerManager:
 
     def cleanup(self):
         """Clean up Docker resources (for testing)"""
-        if not self.docker_available:
+        if not self.docker_available or self._image_removed:
             return
 
         try:
+            # Check if image exists before trying to remove.
+            result = subprocess.run(
+                [self.docker_cmd, "images", "-q", self.container_name],
+                capture_output=True, timeout=5
+            )
+            if not result.stdout.strip():
+                self._image_removed = True
+                return
+
             # Remove container if it exists
             subprocess.run([self.docker_cmd, "rmi", self.container_name],
                            capture_output=True, timeout=30)
-        except:
+            self._image_removed = True
+        except Exception:
             pass  # Ignore cleanup errors
